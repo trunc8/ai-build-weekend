@@ -118,7 +118,7 @@ def process_image(uploaded_file):
     
     try:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Your uploaded image", use_column_width=True)
+        st.image(image, caption="Your uploaded image", use_container_width=True)
         
         # Session state helps prevent rerunning the API call on each interaction
         if 'compliment' not in st.session_state:
