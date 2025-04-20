@@ -1,4 +1,6 @@
 from google import genai
+from google.genai import types
+import os
 from dotenv import load_dotenv
 import time
 
@@ -46,6 +48,19 @@ def analyze_video_from_path(video_path, prompt_text, model_name="gemini-2.0-flas
             model=model_name,
             contents=[video_file, prompt_text]
         )
+        response = client.models.generate_content(
+            model=f"models/{model_name}",
+            contents=[
+                "Summarise this video please.",
+                video_file
+                ],
+            config=types.GenerateContentConfig(
+                system_instruction=prompt_text,
+                ),
+            )
+
+        # delete video
+        client.files.delete(name=video_file.name)
         
         return response.text
     except FileNotFoundError:
@@ -55,8 +70,8 @@ def analyze_video_from_path(video_path, prompt_text, model_name="gemini-2.0-flas
 
 def main():
     """Main function to run the video analysis."""
-    video_path = "outfit-1.jpg"
-    prompt = "Give a kind and creative compliment about the person in this photo. Make sure to specify the colors in the outfit."
+    video_path = "house_video-1.mp4"
+    prompt = "You should provide a quick 2 or 3 sentence summary of what is happening in the video."
     
     result = analyze_video_from_path(video_path, prompt)
     print(result)
