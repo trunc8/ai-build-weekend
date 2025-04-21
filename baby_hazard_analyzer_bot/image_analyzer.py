@@ -6,7 +6,24 @@ This script takes an image and generates a creative description focusing on outf
 import os
 from PIL import Image
 from google import genai
+from google.genai.types import GenerateContentConfig, HttpOptions, Part, SafetySetting
 from dotenv import load_dotenv
+
+from pydantic import BaseModel
+
+# Helper class to represent a bounding box
+class BoundingBox(BaseModel):
+    """
+    Represents a bounding box with its 2D coordinates and associated label.
+
+    Attributes:
+        box_2d (list[int]): A list of integers representing the 2D coordinates of the bounding box,
+                            typically in the format [x_min, y_min, x_max, y_max].
+        label (str): A string representing the label or class associated with the object within the bounding box.
+    """
+
+    box_2d: list[int]
+    label: str
 
 def setup_client():
     """Initialize and return the Gemini API client."""
@@ -34,11 +51,30 @@ def analyze_image(image, prompt_text, model_name="gemini-2.0-flash"):
     try:
         # Setup client
         client = setup_client()
+
+        config = GenerateContentConfig(
+            system_instruction="""
+            Return bounding boxes as an array with labels.
+            Never return masks. Limit to 25 objects.
+            If an object is present multiple times, give each object a unique label
+            according to its distinct characteristics (colors, size, position, etc..).
+            """,
+            temperature=0.5,
+            safety_settings=[
+                SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="BLOCK_ONLY_HIGH",
+                ),
+            ],
+            response_mime_type="application/json",
+            response_schema=list[BoundingBox],  # Add BoundingBox class to the response schema
+        )
         
         # Generate content
         response = client.models.generate_content(
             model=model_name,
-            contents=[image, prompt_text]
+            contents=[image, prompt_text],
+            config=config
         )
         
         return response.text

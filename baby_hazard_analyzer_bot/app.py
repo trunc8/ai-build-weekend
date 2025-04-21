@@ -2,19 +2,20 @@ import streamlit as st
 import cv2
 import tempfile
 from PIL import Image
+from PIL import ImageOps
 import numpy as np
 import os
 import requests
 import json
 import re
 from image_analyzer import analyze_image
+from stqdm import stqdm
 
 prompt = \
-    """You are helping parents identify potential hazards in a room where young children (under 5 years old) may play.
+"""You are helping parents identify potential hazards in a room where young children (under 5 years old) may play.
 
 From the uploaded image, identify only realistic and significant safety risks, such as:
 
-- Potentially toxic substances (e.g., cleaning supplies, medications, chemicals)
 - Items that could cause strangulation (e.g., cords, strings) or suffocation (e.g., plastic bags, pillows)
 - Sharp edges at child height
 - Exposed electrical outlets
@@ -24,15 +25,7 @@ From the uploaded image, identify only realistic and significant safety risks, s
 - Heavy or hot objects within child reach
 - Dangerous items within reach (e.g., knives, scissors)
 
-Output a json list where each entry contains the 2D bounding box in "box_2d" and a text label in "label"."""
-
-def is_valid_json(json_string):
-    try:
-        json.loads(json_string)
-        return True
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON: {e}")
-        return False
+Output a json list where each entry contains the 2D bounding box as [ymin, xmin, ymax, xmax] in "box_2d" and a text label in "label"."""
 
 def extract_json_from_string(text):
     # Try to extract the first JSON-like object or array
@@ -43,8 +36,8 @@ def extract_json_from_string(text):
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}. TEXT: {text}")
     else:
-        print("No JSON found. TEXT: {text}")
-    return None
+        print(f"No JSON found. TEXT: {text}")
+    return []
 
 def setup_page():
     """Configure page settings and styling."""
@@ -55,20 +48,15 @@ def setup_page():
 # Function to send image to Gemini API and get bounding boxes
 def get_bounding_boxes_from_gemini(image: Image.Image) -> list:
     global prompt
-    """
-    Sends the image to the Gemini API and retrieves bounding boxes.
-    """
+    # """
+    # Sends the image to the Gemini API and retrieves bounding boxes.
+    # """
     try:
-        with st.spinner("AI is analyzing each frame..."):
-            boxes = extract_json_from_string(analyze_image(image, prompt))
-            print("\n Analyzed boxes: ", boxes)
-            return boxes
-            # print("is_valid:", is_valid_json(boxes))
-            # if not is_valid_json(boxes):
-            #     return []
-            # else:
-            #     # boxes = json.loads(boxes)
-            #     return boxes
+        response = analyze_image(image, prompt)
+        print(response)
+        boxes = extract_json_from_string(response)
+        print("\n Analyzed boxes: ", boxes)
+        return boxes
     except Exception as e:
         st.error(f"Error generating boxes: {e}")
         return []
@@ -76,42 +64,6 @@ def get_bounding_boxes_from_gemini(image: Image.Image) -> list:
 def main():
     """Main application function."""
     setup_page()
-    # display_header()
-    
-    # # Add decorative container
-    # with st.container():
-    #     st.markdown("<div style='padding: 20px; background-color: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);'>", unsafe_allow_html=True)
-        
-    #     # Video upload
-    #     uploaded_video = st.file_uploader("Upload your room video", type=["mp4", "mov", "avi"])
-        
-    #     # Process image if uploaded
-    #     image, compliment = process_image(uploaded_file)
-        
-    #     # Show compliment button only if image is uploaded
-    #     if image is not None:
-    #         # Centered button
-    #         col1, col2, col3 = st.columns([1, 2, 1])
-    #         with col2:
-    #             if st.button("✨ Get My Compliment"):
-    #                 compliment = generate_compliment(image)
-        
-    #     # Display compliment if available
-    #     if compliment:
-    #         st.success("Here's what the AI says:")
-    #         st.markdown(f"<div class='result-box'><em>{compliment}</em></div>", unsafe_allow_html=True)
-            
-    #         # Add option to try again
-    #         col1, col2, col3 = st.columns([1, 2, 1])
-    #         with col2:
-    #             if st.button("Try Another Photo"):
-    #                 st.session_state.compliment = None
-    #                 st.rerun()
-                    
-    #     st.markdown("</div>", unsafe_allow_html=True)
-    
-    # # Footer
-    # st.markdown("<div style='text-align: center; margin-top: 40px; color: #718096; font-size: 14px;'>Made with ❤️ for Google AI Hackathon</div>", unsafe_allow_html=True)
 
     # Video upload
     uploaded_video = st.file_uploader("Upload your room video", type=["mp4", "mov", "avi"])
@@ -151,24 +103,38 @@ def main():
 
             annotated_frames = []
 
-            for idx, frame in enumerate(frames):
+            for idx in stqdm(range(len(frames))):
+                frame = frames[idx]
                 # Get bounding boxes from Gemini API
                 boxes = get_bounding_boxes_from_gemini(frame)
 
                 # Convert PIL Image to OpenCV format
                 frame_cv = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+                # Rotate by 90 degrees clockwise
+                frame_cv = cv2.rotate(frame_cv, cv2.ROTATE_90_CLOCKWISE)
 
                 # Draw bounding boxes
                 for box in boxes:
-                    ymin, xmin, ymax, xmax = box['box_2d']
-                    cv2.rectangle(frame_cv, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                    if 'box_2d' in box and len(box['box_2d']) == 4:
+                        ymin, xmin, ymax, xmax = box['box_2d']
+                        cv2.rectangle(frame_cv, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                        
+                        label = box['label']
+                        # Set font and scale
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 0.6
+                        font_thickness = 2
+                        text_size, _ = cv2.getTextSize(label, font, font_scale, font_thickness)
+
+                        # Position for the label
+                        label_origin = (xmin, ymin - 10)
+
+                        cv2.putText(frame_cv, label, label_origin, font, font_scale, (0, 0, 0), font_thickness)
 
                 # Convert back to PIL Image for Streamlit
                 annotated_frame = Image.fromarray(cv2.cvtColor(frame_cv, cv2.COLOR_BGR2RGB))
+                annotated_frame = ImageOps.exif_transpose(annotated_frame)
                 annotated_frames.append(annotated_frame)
-
-                # Display the annotated frame
-                st.image(annotated_frame, caption=f"Annotated Frame {idx + 1}", use_container_width=True)
 
             # Define video properties
             frame_height, frame_width = annotated_frames[0].size[1], annotated_frames[0].size[0]
@@ -189,8 +155,10 @@ def main():
 
             video_writer.release()
 
+            os.system(f"ffmpeg -i {temp_output_video_path} -vcodec libx264 {temp_output_video_path}_out.mp4") 
+
             # Display the annotated video in Streamlit
-            st.video(temp_output_video_path)
+            st.video(f"{temp_output_video_path}_out.mp4")
 
             # Optionally, delete the temporary files after use
             # os.unlink(temp_video_path)
